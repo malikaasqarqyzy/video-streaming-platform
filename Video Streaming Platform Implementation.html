@@ -1,0 +1,275 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Streaming Platform</title>
+  <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@7.22.9/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    // Front-End (React)
+    const { useState, useEffect } = React;
+
+    const App = () => {
+      const [user, setUser] = useState(null);
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [videos, setVideos] = useState([]);
+      const [file, setFile] = useState(null);
+      const [title, setTitle] = useState('');
+      const [message, setMessage] = useState('');
+      const [selectedVideo, setSelectedVideo] = useState(null);
+      const [selectedQuality, setSelectedQuality] = useState('720p');
+
+      const login = async () => {
+        try {
+          const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            setUser(data.token);
+            setMessage('Login successful');
+            fetchVideos(data.token);
+          } else {
+            setMessage(data.error);
+          }
+        } catch (err) {
+          setMessage('Error logging in');
+        }
+      };
+
+      const register = async () => {
+        try {
+          const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            setMessage('Registration successful. Please log in.');
+          } else {
+            setMessage(data.error);
+          }
+        } catch (err) {
+          setMessage('Error registering');
+        }
+      };
+
+      const fetchVideos = async (token) => {
+        try {
+          const res = await fetch('/api/videos', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          const data = await res.json();
+          if (res.ok) {
+            setVideos(data);
+          } else {
+            setMessage(data.error);
+          }
+        } catch (err) {
+          setMessage('Error fetching videos');
+        }
+      };
+
+      const uploadVideo = async () => {
+        if (!file || !title) {
+          setMessage('Please select a file and enter a title');
+          return;
+        }
+        const formData = new FormData();
+        formData.append('video', file);
+        formData.append('title', title);
+        try {
+          const res = await fetch('/api/videos/upload', {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${user}` },
+            body: formData,
+          });
+          const data = await res.json();
+          if (res.ok) {
+            setMessage('Video uploaded successfully');
+            fetchVideos(user);
+          } else {
+            setMessage(data.error);
+          }
+        } catch (err) {
+          setMessage('Error uploading video');
+        }
+      };
+
+      const VideoPlayer = ({ videoId }) => {
+        const videoRef = React.useRef(null);
+        const [isPlaying, setIsPlaying] = useState(false);
+
+        return (
+          <div className="mb-4">
+            <video
+              ref={videoRef}
+              controls
+              className="w-full"
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+            >
+              <source
+                src={`/api/videos/stream/${videoId}/${selectedQuality}`}
+                type="video/mp4"
+              />
+              Your browser does not support the video tag.
+            </video>
+            <div className="mt-2">
+              <select
+                value={selectedQuality}
+                onChange={(e) => setSelectedQuality(e.target.value)}
+                className="p-2 border rounded"
+              >
+                <option value="1080p">1080p</option>
+                <option value="720p">720p</option>
+                <option value="480p">480p</option>
+              </select>
+            </div>
+          </div>
+        );
+      };
+
+      if (!user) {
+        return (
+          <div className="flex items-center justify-center min-h-screen bg-gray-100">
+            <div className="bg-white p-6 rounded shadow-md w-full max-w-md">
+              <h2 className="text-2xl mb-4">Video Streaming Platform</h2>
+              <input
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full p-2 mb-2 border rounded"
+              />
+              <input
+                type="password"
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full p-2 mb-2 border rounded"
+              />
+              <div className="flex space-x-2">
+                <button onClick={login} className="bg-blue-500 text-white p-2 rounded">
+                  Login
+                </button>
+                <button onClick={register} className="bg-green-500 text-white p-2 rounded">
+                  Register
+                </button>
+              </div>
+              {message && <p className="mt-2 text-red-500">{message}</p>}
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div className="p-4">
+          <h2 className="text-2xl mb-4">Welcome</h2>
+          <button
+            onClick={() => setUser(null)}
+            className="bg-red-500 text-white p-2 rounded mb-4"
+          >
+            Logout
+          </button>
+          <div className="mb-4">
+            <h3 className="text-xl mb-2">Upload Video</h3>
+            <input
+              type="text"
+              placeholder="Video Title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full p-2 mb-2 border rounded"
+            />
+            <input
+              type="file"
+              accept="video/*"
+              onChange={(e) => setFile(e.target.files[0])}
+              className="mb-2"
+            />
+            <button onClick={uploadVideo} className="bg-blue-500 text-white p-2 rounded">
+              Upload
+            </button>
+          </div>
+          <h3 className="text-xl mb-2">Your Videos</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {videos.map((video) => (
+              <div key={video.video_id} className="border p-4 rounded">
+                <h4 className="text-lg font-semibold">{video.title}</h4>
+                <p className="text-sm text-gray-600">Status: {video.status}</p>
+                {video.status === 'ready' && (
+                  <div className="mt-2">
+                    <button
+                      onClick={() => setSelectedVideo(video.video_id)}
+                      className="bg-green-500 text-white p-2 rounded"
+                    >
+                      Play Video
+                    </button>
+                  </div>
+                )}
+                {selectedVideo === video.video_id && (
+                  <div className="mt-4">
+                    <VideoPlayer videoId={video.video_id} />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          {message && <p className="mt-2 text-red-500">{message}</p>}
+        </div>
+      );
+    };
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+  </script>
+</body>
+</html>
